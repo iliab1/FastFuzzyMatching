@@ -66,6 +66,9 @@ class FastFuzzyMatch:
             df: pd.DataFrame,
             column_name: str
     ) -> pd.DataFrame:
+        # Add original column to the DataFrame before cleaning
+        original_column_name = f'original_{column_name}'
+        df[original_column_name] = df[column_name]
         # Clean text data in the specified column of the DataFrame
         logging.info(f'Cleaning text in column: {column_name}')
         df.drop_duplicates(subset=[column_name], inplace=True)
