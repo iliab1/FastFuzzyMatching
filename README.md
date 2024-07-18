@@ -1,8 +1,10 @@
 # FastFuzzyMatch
 
 `FastFuzzyMatch` is a Python class designed to perform efficient fuzzy matching between two datasets. 
-
-It leverages a combination of text embedding, dimensionality reduction, clustering, and fuzzy matching techniques to find the closest matches between entries in a clean dataset and a dirty dataset.
+It leverages a combination of text embedding, dimensionality reduction, clustering, and fuzzy matching techniques to find the closest matches between entries in a clean dataset and a dirty dataset. 
+This project is inspired by and builds upon the techniques described in the Medium article 
+[Fuzzy String Matching Optimization using TF-IDF and KNN](https://audhiaprilliant.medium.com/fuzzy-string-matching-optimization-using-tf-idf-and-knn-b07fce69b58f) 
+by Audhi Aprilliant.
 
 ## Features
 
