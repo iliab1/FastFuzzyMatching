@@ -16,7 +16,8 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 class FastFuzzyMatch:
     def __init__(
             self,
-            clean: True,
+            clean: bool,
+            merge: bool,
             embedding_model: Optional[Any] = None,
             dimensionality_reduction_model: Optional[Any] = None,
             clustering_model: Optional[Any] = None,
@@ -24,6 +25,7 @@ class FastFuzzyMatch:
             fuzzy_scorer: Optional[Any] = None,
     ):
         self.clean = clean
+        self.merge = merge
 
         if embedding_model is None:
             vectorizer_params = {
@@ -61,11 +63,13 @@ class FastFuzzyMatch:
 
     @staticmethod
     def clean_text(
-            df,
-            column_name
-    ):
+            df: pd.DataFrame,
+            column_name: str
+    ) -> pd.DataFrame:
+        # Clean text data in the specified column of the DataFrame
         logging.info(f'Cleaning text in column: {column_name}')
-        df.drop_duplicates(subset=[column_name]).reset_index(drop=True)
+        df.drop_duplicates(subset=[column_name], inplace=True)
+        df.reset_index(drop=True, inplace=True)
         df[column_name] = df[column_name].astype(str).str.lower()
         df[column_name] = df[column_name].str.replace(r'[^\w\s]', '', regex=True)
         df[column_name] = df[column_name].str.replace(r'\s+', ' ', regex=True)
@@ -76,43 +80,41 @@ class FastFuzzyMatch:
             self,
             clean: pd.Series,
             dirty: pd.Series
-    ) -> Tuple[np.array, np.array]:
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        # Create embeddings for clean and dirty data
         logging.info('Creating embeddings for clean and dirty data.')
-        # Vectorize the clean and dirty data
         clean_vec = self.embedding_model.fit_transform(clean.values.astype('U'))
-        dirty_vec = self.embedding_model.transform(dirty)  # dirty.values.astype('U')
-
+        dirty_vec = self.embedding_model.transform(dirty.values.astype('U'))
         return clean_vec, dirty_vec
 
     def dimensionality_reduction(
             self,
-            clean_vec: np.array,
-            dirty_vec: np.array
-    ) -> Tuple[np.array, np.array]:
+            clean_vec: np.ndarray,
+            dirty_vec: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        # Perform dimensionality reduction
         logging.info('Performing dimensionality reduction.')
-        # Dimensionality reduction
         reduced_clean_vec = self.dimensionality_reduction_model.fit_transform(clean_vec)
         reduced_dirty_vec = self.dimensionality_reduction_model.transform(dirty_vec)
         return reduced_clean_vec, reduced_dirty_vec
 
     def clustering(
             self,
-            clean_vec: np.array,
-            dirty_vec: np.array
-    ) -> Tuple[np.array, np.array]:
+            clean_vec: np.ndarray,
+            dirty_vec: np.ndarray
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        # Perform clustering on the data
         logging.info('Clustering data.')
-        # Fit the nearest neighbors
         self.clustering_model.fit(clean_vec)
-        # Find the nearest neighbors
         distances, indices = self.clustering_model.kneighbors(dirty_vec, n_neighbors=1)
-
         return distances, indices
 
     def similarity_search(
             self,
             clean: pd.Series,
             dirty: pd.Series
-    ) -> np.array:
+    ) -> np.ndarray:
+        # Conduct similarity search using aforementioned methods
         logging.info('Starting similarity search.')
         clean_vec, dirty_vec = self.embedding(clean, dirty)
 
@@ -121,7 +123,6 @@ class FastFuzzyMatch:
 
         distances, indices = self.clustering(clean_vec, dirty_vec)
         nearest_values = np.array(clean)[indices]
-
         return nearest_values
 
     def fuzzy_match(
@@ -129,12 +130,10 @@ class FastFuzzyMatch:
             row: str,
             match_candidates: List[str]
     ) -> List[Tuple[str, str, int]]:
-
+        # Perform fuzzy matching between a row and a list of match candidates
         enumerated_matches = dict(enumerate(match_candidates))
-
         row_matches = self.fuzzy_model.process.extract(
             row, enumerated_matches, scorer=self.fuzzy_scorer, limit=5)
-
         result = [(row, match[0], match[1]) for match in row_matches]
         return result
 
@@ -145,21 +144,17 @@ class FastFuzzyMatch:
             clean_column_name: str,
             dirty_column_name: str
     ) -> pd.DataFrame:
-
-        # Find the nearest values
+        # Perform fuzzy search on all rows in the dirty data
         nearest_values = self.similarity_search(clean, dirty)
-
         logging.info('Starting fuzzy search.')
-        # For each row in the dirty data, find the best matches using its nearest values in the clean data
         results = []
         with logging_redirect_tqdm():
             for i, row in enumerate(tqdm(dirty, desc="Fuzzy Matching Progress")):
                 results.append(self.fuzzy_match(row, nearest_values[i]))
 
-        # Flatten the results and convert them to a DataFrame
         df = pd.DataFrame(
             itertools.chain.from_iterable(results),
-            columns=[dirty_column_name, clean_column_name, 'Ratio']
+            columns=[dirty_column_name, 'Result', 'score']
         )
         return df
 
@@ -170,30 +165,57 @@ class FastFuzzyMatch:
             dirty_df: pd.DataFrame,
             dirty_column: str,
     ) -> pd.DataFrame:
-
-        # Check if the columns exist
+        # Main function
         if clean_column not in clean_df.columns:
             raise KeyError(f"'{clean_column}' not found in clean_df columns")
         if dirty_column not in dirty_df.columns:
             raise KeyError(f"'{dirty_column}' not found in dirty_df columns")
 
-        # Pre-process data
-        clean_df = clean_df.copy()
-        dirty_df = dirty_df.copy()
-        if self.clean:
-            clean_df = self.clean_text(clean_df, clean_column)
-            dirty_df = self.clean_text(dirty_df, dirty_column)
+        if clean_column == dirty_column:
+            raise ValueError('clean_column and dirty_column cannot be the same')
 
-        # Take the subset directly to speed up the process
-        # Find matches
-        start = time.time()
+        clean_df_copy = clean_df.copy()
+        dirty_df_copy = dirty_df.copy()
+
+        # Clean text if clean is True
+        if self.clean:
+            clean_df_copy = self.clean_text(clean_df_copy, clean_column)
+            dirty_df_copy = self.clean_text(dirty_df_copy, dirty_column)
+
+        start = time.time() # Set timer
         result = self.fuzzy_search(
-            clean=clean_df[clean_column],
-            dirty=dirty_df[dirty_column],
+            clean=clean_df_copy[clean_column],
+            dirty=dirty_df_copy[dirty_column],
             clean_column_name=clean_column,
             dirty_column_name=dirty_column
         )
         end = time.time()
+
         logging.info('Fuzzy matching completed in {} seconds'.format(end - start))
 
-        return result
+        # Merge the result with the original data if merge is True
+        if self.merge:
+            # Merge the result with the original data
+            logging.info("Initial merge with dirty dataframe")
+
+            # Merge with the left (dirty) DataFrame
+            merged_df = pd.merge(
+                left=dirty_df_copy,
+                right=result,
+                how='left',
+                left_on=dirty_column,
+                right_on=dirty_column
+            )
+            logging.info("Merge result with clean dataframe")
+
+            merged_df_right = pd.merge(
+                merged_df,
+                clean_df_copy,
+                how='left',
+                left_on='Result',
+                right_on=clean_column
+            )
+
+            return merged_df_right
+        else:
+            return result
